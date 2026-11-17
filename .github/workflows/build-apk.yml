@@ -14,11 +14,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +56,112 @@ jobs:
           sed -i 's#</manifest>#    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" android/app/build.gradle
 
+      - name: Recevoir les fichiers du menu Partager d'Android
+        run: |
+          D=$(dirname "$(find android/app/src/main/java -name MainActivity.java | head -1)")
+          echo "Dossier Java : $D"
+          cat > "$D/ShareReceiverPlugin.java" <<'JEOF'
+          package com.mahmoh1960.sharenode;
+
+          import android.content.ContentResolver;
+          import android.content.Intent;
+          import android.database.Cursor;
+          import android.net.Uri;
+          import android.provider.OpenableColumns;
+          import com.getcapacitor.JSArray;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.util.ArrayList;
+
+          @CapacitorPlugin(name = "ShareReceiver")
+          public class ShareReceiverPlugin extends Plugin {
+
+            @Override
+            protected void handleOnNewIntent(Intent intent) {
+              super.handleOnNewIntent(intent);
+              getActivity().setIntent(intent);
+              notifyListeners("shared", new JSObject());
+            }
+
+            @PluginMethod
+            public void getShared(PluginCall call) {
+              JSArray files = new JSArray();
+              Intent intent = getActivity().getIntent();
+              String action = intent == null ? null : intent.getAction();
+              if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+                ArrayList<Uri> uris = new ArrayList<>();
+                if (Intent.ACTION_SEND.equals(action)) {
+                  Uri one = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                  if (one != null) uris.add(one);
+                } else {
+                  ArrayList<Uri> many = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                  if (many != null) uris.addAll(many);
+                }
+                intent.setAction(Intent.ACTION_MAIN);
+                ContentResolver cr = getContext().getContentResolver();
+                int n = 0;
+                for (Uri u : uris) {
+                  try {
+                    String name = "fichier";
+                    Cursor c = cr.query(u, null, null, null, null);
+                    if (c != null) {
+                      try {
+                        int idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                        if (idx >= 0 && c.moveToFirst()) name = c.getString(idx);
+                      } finally {
+                        c.close();
+                      }
+                    }
+                    File out = new File(getContext().getCacheDir(), "shared_" + (n++) + "_" + name.replaceAll("[^A-Za-z0-9._-]", "_"));
+                    try (InputStream in = cr.openInputStream(u); FileOutputStream os = new FileOutputStream(out)) {
+                      byte[] buf = new byte[65536];
+                      int r;
+                      while ((r = in.read(buf)) > 0) os.write(buf, 0, r);
+                    }
+                    JSObject f = new JSObject();
+                    f.put("name", name);
+                    f.put("type", cr.getType(u));
+                    f.put("path", out.getAbsolutePath());
+                    files.put(f);
+                  } catch (Exception e) {
+                  }
+                }
+              }
+              JSObject res = new JSObject();
+              res.put("files", files);
+              call.resolve(res);
+            }
+          }
+          JEOF
+          cat > "$D/MainActivity.java" <<'JEOF'
+          package com.mahmoh1960.sharenode;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+              registerPlugin(ShareReceiverPlugin.class);
+              super.onCreate(savedInstanceState);
+            }
+          }
+          JEOF
+          python3 - <<'PEOF'
+          p='android/app/src/main/AndroidManifest.xml'
+          s=open(p).read()
+          f=''.join('<intent-filter><action android:name="android.intent.action.%s"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="*/*"/></intent-filter>\n'%a for a in ('SEND','SEND_MULTIPLE'))
+          s=s.replace('</activity>',f+'</activity>',1)
+          open(p,'w').write(s)
+          print('manifest ok')
+          PEOF
+
       - name: Icône de l'application (facultatif)
         continue-on-error: true
         run: |
@@ -71,34 +172,20 @@ jobs:
       - name: Licences Android
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
+      - name: Clé de signature stable (mises à jour sans désinstaller)
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: debug-keystore-v1
+
       - name: Compiler l'APK de test (debug)
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Publier l'APK de test
+      - name: Publier l'APK
         uses: actions/upload-artifact@v4
         with:
           name: ShareNode-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Version Release signée (AAB Play Store + APK)
-        if: env.KEYSTORE_BASE64 != ''
-        working-directory: android
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > ../release.jks
-          ./gradlew bundleRelease assembleRelease --no-daemon
-          jarsigner -keystore ../release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" app/build/outputs/bundle/release/app-release.aab "$KEY_ALIAS"
-          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          $BT/zipalign -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-          $BT/apksigner sign --ks ../release.jks --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --ks-key-alias "$KEY_ALIAS" --out app/build/outputs/apk/release/app-release.apk aligned.apk
-
-      - name: Publier la version Release
-        if: env.KEYSTORE_BASE64 != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShareNode-Release
-          path: |
-            android/app/build/outputs/bundle/release/app-release.aab
-            android/app/build/outputs/apk/release/app-release.apk
