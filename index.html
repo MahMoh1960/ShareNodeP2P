@@ -128,7 +128,8 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const CH=16384;
 let ch=null,peer=null,myId='',pc=null,queue=[],rx=null,cancel=false,busy=false,remote='Pair',vs=null,timer=null,lastCode='';
 const hist=[];
-const base=()=>location.origin+location.pathname;
+const PUBLIC_URL='https://mahmoh1960.github.io/ShareNode-P2P/';
+const base=()=>/^(localhost|127\.0\.0\.1)$/.test(location.hostname)?PUBLIC_URL:location.origin+location.pathname;
 let pend=new URLSearchParams(location.search).get('c')||'';
 if(pend)history.replaceState(null,'',location.pathname);
 const myName=localStorage.sn_name||(localStorage.sn_name='Mobile-'+Math.floor(1000+Math.random()*9000));
@@ -238,7 +239,7 @@ async function scan(){
     const v=$('sv');v.srcObject=vs;
     let det=null;
     if('BarcodeDetector' in window){try{det=new BarcodeDetector({formats:['qr_code']})}catch(e){}}
-    if(!det&&typeof jsQR==='undefined')await loadJs('https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js');
+    if(!det&&typeof jsQR==='undefined')await loadJs('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js');
     const cv=document.createElement('canvas'),cx=cv.getContext('2d',{willReadFrequently:true});
     timer=setInterval(async()=>{
       if(!v.videoWidth)return;let txt='';
@@ -303,8 +304,8 @@ async function sendAll(){
 }
 function cancelTx(){cancel=true;if(rx){rx=null;tx({t:'cancel'});prog(0,'')}}
 function addHist(name,type,blob){
-  hist.unshift({name,type,time:new Date().toLocaleTimeString(),url:blob?URL.createObjectURL(blob):''});
-  $('hist').innerHTML=hist.map(h=>`<div class="item"><span><b>${esc(h.name)}</b> (${h.type})</span><span>${h.url?`<a href="${h.url}" download="${esc(h.name)}">⬇ Enregistrer</a>`:`<span class="y">${h.time}</span>`}</span></div>`).join('');
+  hist.unshift({name,type,time:new Date().toLocaleTimeString(),blob,url:blob?URL.createObjectURL(blob):''});
+  $('hist').innerHTML=hist.map((h,i)=>`<div class="item"><span><b>${esc(h.name)}</b> (${h.type})</span><span>${h.url?`<a data-i="${i}" href="${h.url}" download="${esc(h.name)}">⬇ Enregistrer</a>`:`<span class="y">${h.time}</span>`}</span></div>`).join('');
 }
 function notify(n){
   try{navigator.vibrate&&navigator.vibrate([120,60,120])}catch(e){}
@@ -336,7 +337,18 @@ function renderRecent(){
 }
 $('recent').onclick=e=>{const d=e.target.closest('[data-id]');if(d)linkTo(d.dataset.id)};
 
-log('Version 2.2');renderRecent();initPeer();
+const isNative=()=>window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform();
+$('hist').onclick=async e=>{
+  const a=e.target.closest('a[data-i]');if(!a||!isNative())return;
+  e.preventDefault();const h=hist[+a.dataset.i];
+  try{
+    const P=Capacitor.Plugins;
+    const b=await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.split(',')[1]);f.readAsDataURL(h.blob)});
+    const w=await P.Filesystem.writeFile({path:h.name.replace(/[\\/]/g,'_'),data:b,directory:'CACHE'});
+    await P.Share.share({title:h.name,url:w.uri,dialogTitle:'Enregistrer ou partager'});
+  }catch(x){log('Enregistrement impossible : '+(x.message||x))}
+};
+log('Version 2.3');renderRecent();initPeer();
 if(location.hash.startsWith('#SNO:')){const h=location.hash.slice(1);history.replaceState(null,'',location.pathname);setMode('qr');setTimeout(()=>handleCode(h),300)}
 </script>
 </body>

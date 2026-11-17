@@ -3,7 +3,7 @@ const CORE = ['./', './index.html', './manifest.json', './icon-192.png', './icon
 const EXTERNAL = [
   'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js'
+  'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'
 ];
 
 // Installation : chaque fichier est mis en cache séparément, un échec isolé n'annule plus tout
@@ -28,7 +28,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
-  const ours = url.origin === location.origin || url.hostname === 'cdnjs.cloudflare.com';
+  const ours = url.origin === location.origin || ['cdnjs.cloudflare.com','cdn.jsdelivr.net'].includes(url.hostname);
   if (req.method !== 'GET' || !ours) return; // le serveur PeerJS n'est pas intercepté
 
   // Pages : réseau d'abord (mises à jour immédiates), cache en secours hors-ligne
