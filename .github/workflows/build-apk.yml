@@ -33,8 +33,8 @@ jobs:
           C=https://cdnjs.cloudflare.com/ajax/libs
           curl -fL --retry 3 -o www/qrcode.min.js $C/qrcodejs/1.0.0/qrcode.min.js
           curl -fL --retry 3 -o www/peerjs.min.js $C/peerjs/1.5.4/peerjs.min.js
-          curl -fL --retry 3 -o www/jsQR.min.js $C/jsQR/1.4.0/jsQR.min.js
-          sed -i "s#$C/qrcodejs/1.0.0/qrcode.min.js#qrcode.min.js#; s#$C/peerjs/1.5.4/peerjs.min.js#peerjs.min.js#; s#$C/jsQR/1.4.0/jsQR.min.js#jsQR.min.js#" www/index.html
+          curl -fL --retry 3 -o www/jsQR.min.js https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js
+          sed -i "s#$C/qrcodejs/1.0.0/qrcode.min.js#qrcode.min.js#; s#$C/peerjs/1.5.4/peerjs.min.js#peerjs.min.js#; s#$C/jsQR/1.4.0/jsQR.min.js#jsQR.min.js#; s#https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js#jsQR.min.js#" www/index.html
           grep -c "cdnjs" www/index.html || true
 
       - name: Créer le projet Android (Capacitor)
