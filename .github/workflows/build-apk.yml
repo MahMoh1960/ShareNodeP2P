@@ -14,6 +14,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,9 +49,10 @@ jobs:
           echo '{"appId":"com.mahmoh1960.sharenode","appName":"ShareNode","webDir":"www","server":{"androidScheme":"https"}}' > capacitor.config.json
           npx cap add android
 
-      - name: Autoriser la caméra
+      - name: Caméra et numéro de version
         run: |
           sed -i 's#</manifest>#    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/" android/app/build.gradle
 
       - name: Icône de l'application (facultatif)
         continue-on-error: true
@@ -58,14 +64,34 @@ jobs:
       - name: Licences Android
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Compiler l'APK
+      - name: Compiler l'APK de test (debug)
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Publier l'APK
+      - name: Publier l'APK de test
         uses: actions/upload-artifact@v4
         with:
           name: ShareNode-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Version Release signée (AAB Play Store + APK)
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: android
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > ../release.jks
+          ./gradlew bundleRelease assembleRelease --no-daemon
+          jarsigner -keystore ../release.jks -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" app/build/outputs/bundle/release/app-release.aab "$KEY_ALIAS"
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          $BT/apksigner sign --ks ../release.jks --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --ks-key-alias "$KEY_ALIAS" --out app/build/outputs/apk/release/app-release.apk aligned.apk
+
+      - name: Publier la version Release
+        if: env.KEYSTORE_BASE64 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShareNode-Release
+          path: |
+            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/apk/release/app-release.apk
