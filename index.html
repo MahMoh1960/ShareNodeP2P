@@ -128,6 +128,9 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const CH=16384;
 let ch=null,peer=null,myId='',pc=null,queue=[],rx=null,cancel=false,busy=false,remote='Pair',vs=null,timer=null,lastCode='';
 const hist=[];
+const base=()=>location.origin+location.pathname;
+let pend=new URLSearchParams(location.search).get('c')||'';
+if(pend)history.replaceState(null,'',location.pathname);
 const myName=localStorage.sn_name||(localStorage.sn_name='Mobile-'+Math.floor(1000+Math.random()*9000));
 
 function log(m){const l=$('log');l.innerHTML+='<br>['+new Date().toLocaleTimeString()+'] '+esc(m);l.scrollTop=l.scrollHeight}
@@ -146,7 +149,7 @@ function initPeer(){
   if(typeof Peer==='undefined'){log('PeerJS indisponible : utilisez le mode QR');setStatus('Hors-ligne');$('my-id').textContent='—';return}
   myId=localStorage.sn_id||'SN-'+Math.random().toString(36).slice(2,8).toUpperCase();
   peer=new Peer(myId);
-  peer.on('open',id=>{myId=id;localStorage.sn_id=id;$('my-id').textContent=id;drawQr('qr1','SN:'+id,150);if(!ch)setStatus('Prêt');log('ID : '+id)});
+  peer.on('open',id=>{myId=id;localStorage.sn_id=id;$('my-id').textContent=id;drawQr('qr1',base()+'?c='+id,160);if(!ch)setStatus('Prêt');log('ID : '+id);if(pend){const p=pend;pend='';linkTo(p)}});
   peer.on('connection',c=>{log('Connexion entrante…');c.on('open',()=>attach(c.dataChannel))});
   peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
   peer.on('error',e=>{
@@ -159,7 +162,8 @@ function linkTo(id){
   if(ch)return log('Déjà connecté');
   log('Connexion à '+id+'…');setStatus('Connexion…');
   const c=peer.connect(id,{reliable:true});
-  const t=setTimeout(()=>{if(!ch){log('Pas de réponse de '+id);setStatus('Prêt')}},12000);
+  const t=setTimeout(()=>{if(!ch){log('Pas de réponse de '+id+' : appli ouverte chez lui ? Sinon essayez le mode QR sans serveur');setStatus('Prêt')}},15000);
+  c.on('iceStateChanged',s=>log('ICE : '+s));
   c.on('open',()=>{clearTimeout(t);attach(c.dataChannel)});
   c.on('error',e=>log('Erreur : '+e));
 }
@@ -187,15 +191,16 @@ const gathered=p=>new Promise(r=>{
   p.onicegatheringstatechange=()=>p.iceGatheringState==='complete'&&r();
   setTimeout(r,3000);
 });
-function showCode(code,hint){
-  lastCode=code;$('qr2').hidden=false;drawQr('qr2',code,280,'L');
+function showCode(code,hint,url){
+  lastCode=code;$('qr2').hidden=false;drawQr('qr2',url||code,280,'L');
   $('code').value=code;$('qr2-hint').textContent=hint;
 }
 async function mkOffer(){
   setStatus('Invitation…');
   const p=newPc(),d=p.createDataChannel('sn');d.onopen=()=>attach(d);
   await p.setLocalDescription(await p.createOffer());await gathered(p);
-  showCode('SNO:'+await pack(p.localDescription),"Faites scanner ce QR par l'autre mobile, puis touchez « 2 » pour scanner sa réponse.");
+  const c='SNO:'+await pack(p.localDescription);
+  showCode(c,"Faites scanner ce QR par l'autre mobile (appareil photo ou bouton « 2 »), puis touchez « 2 » ici pour scanner sa réponse.",base()+'#'+c);
 }
 async function joinOffer(c){
   const p=newPc();
@@ -210,6 +215,9 @@ async function takeAnswer(c){
 }
 function handleCode(t){
   t=(t||'').trim();if(!t)return;
+  log('Code lu : '+t.slice(0,24)+(t.length>24?'…':''));
+  const hi=t.indexOf('#SNO:');if(hi>=0)t=t.slice(hi+1);
+  const mc=t.match(/[?&]c=([^&#]+)/);if(mc)t=decodeURIComponent(mc[1]);
   const run=f=>f().catch(e=>log('Code invalide : '+e.message));
   if(t.startsWith('SNO:')){setMode('qr');run(()=>joinOffer(t.slice(4)))}
   else if(t.startsWith('SNA:'))run(()=>takeAnswer(t.slice(4)));
@@ -328,7 +336,8 @@ function renderRecent(){
 }
 $('recent').onclick=e=>{const d=e.target.closest('[data-id]');if(d)linkTo(d.dataset.id)};
 
-renderRecent();initPeer();
+log('Version 2.2');renderRecent();initPeer();
+if(location.hash.startsWith('#SNO:')){const h=location.hash.slice(1);history.replaceState(null,'',location.pathname);setMode('qr');setTimeout(()=>handleCode(h),300)}
 </script>
 </body>
 </html>
