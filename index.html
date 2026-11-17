@@ -373,7 +373,20 @@ async function loadShared(){
 }
 $('nm').textContent=myName;
 if(new URLSearchParams(location.search).has('shared'))loadShared();
-log('Version 2.4');renderRecent();initPeer();
+async function loadNativeShared(){
+  try{
+    const r=await Capacitor.Plugins.ShareReceiver.getShared();
+    if(!r.files||!r.files.length)return;
+    const fs=[];
+    for(const f of r.files){
+      const b=await(await fetch(Capacitor.convertFileSrc('file://'+f.path))).blob();
+      fs.push(new File([b],f.name,{type:f.type||b.type}));
+    }
+    pick(fs);log(fs.length+' fichier(s) reçu(s) via Partager : connectez-vous puis Transmettre');
+  }catch(e){log('Partage Android impossible : '+(e.message||e))}
+}
+if(isNative()){try{Capacitor.Plugins.ShareReceiver.addListener('shared',loadNativeShared)}catch(e){}loadNativeShared()}
+log('Version 2.5');renderRecent();initPeer();
 if(location.hash.startsWith('#SNO:')){const h=location.hash.slice(1);history.replaceState(null,'',location.pathname);setMode('qr');setTimeout(()=>handleCode(h),300)}
 </script>
 </body>
